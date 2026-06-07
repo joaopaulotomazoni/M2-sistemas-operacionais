@@ -25,6 +25,7 @@ struct ProcessoBloqueado {
 void AtualizarLRU(vector<int>& memoriaRam, int pagina, int posicaoRam, int frames);
 void ProcessarRamHit(queue<Processo*>& filaProntos, vector<int>& memoriaRam, Processo* processoAtual, int posicaoRam, int frames, int clock, int quantum, int& processosConcluidos);
 void ProcessarPageFaults(queue<Processo*>& filaProntos, Processo* processoAtual, int tiquesPenalidadeIO, vector<int>& memoriaRam, vector<ProcessoBloqueado>& filaBloqueados, int frames, int clock);
+void ImprimirEstadoRam(const vector<int>& memoriaRam, int frames);
 
 void lerArquivo(ifstream& arquivo, vector<Processo>& filaInicial, int& frames, int& quantum, int& tiquesPenalidadeIO){
     string linha;
@@ -55,8 +56,9 @@ void lerArquivo(ifstream& arquivo, vector<Processo>& filaInicial, int& frames, i
 
 void AdicionarProcessoFilaProntos(vector<Processo>& filaInicial, queue<Processo*>& filaProntos, int clock){
     for(int i =0; i < filaInicial.size(); i++){
-        if(filaInicial[i].tempoChegada == clock){ //fazer para adicionar a fila de prontos aqueles processos que estavam na fila de bloquados com o tempoBloquado = 0
+        if(filaInicial[i].tempoChegada == clock){ 
             filaProntos.push(&filaInicial[i]);
+            cout << "[Tempo " << clock << "] " << filaInicial[i].nome << " chegou e entrou na fila de prontos." << endl;
         }
     }   
 }
@@ -71,7 +73,7 @@ void VerificarPaginasRam(
     int quantum,
     int& processosConcluidos
 ) {
-    //Pega primeiro processo da fila de prontos 
+   
     Processo* processoAtual = filaProntos.front();
     
     bool ramHit = false;
@@ -106,9 +108,11 @@ void ProcessarRamHit(
 ){
     int paginaAtual = processoAtual->paginas.front(); 
 
-    cout << "[Tempo " << clock << "] " << processoAtual->nome << " obteve RAM Hit na pagina " << paginaAtual << endl;
+    cout << "[Tempo " << clock << "] " << processoAtual->nome << " acessou a pagina " << paginaAtual << " (RAM Hit)." << endl;
 
     AtualizarLRU(memoriaRam, paginaAtual, posicaoRam, frames);
+
+    ImprimirEstadoRam(memoriaRam, frames);
 
     processoAtual->paginas.pop();
     processoAtual->quantumUsado++;
@@ -117,11 +121,12 @@ void ProcessarRamHit(
         processoAtual->tempoFinal = clock + 1;
         filaProntos.pop();
         processosConcluidos++;
+        cout << "[Tempo " << clock << "] " << processoAtual->nome << " concluiu sua execucao. Tempo de Retorno: " << (processoAtual->tempoFinal - processoAtual->tempoChegada) << endl;
     }else if(processoAtual->quantumUsado == quantum){
-        cout << "  -> " << processoAtual->nome << " sofreu preempcao por Quantum." << endl;
+        cout << "[Tempo " << clock << "] " << processoAtual->nome << " sofreu preempcao (Fim do Quantum)." << endl;
         processoAtual->quantumUsado = 0;
         filaProntos.pop();
-        filaProntos.push(processoAtual); //passa o processo para o fim da fila
+        filaProntos.push(processoAtual); 
     }
 }
 
@@ -136,7 +141,7 @@ void ProcessarPageFaults(
 ){
     int paginaPedida = processoAtual->paginas.front();
     
-    cout << "[Tempo " << clock << "] " << processoAtual->nome << " sofreu Page Fault na pagina " << paginaPedida << endl;
+    cout << "[Tempo " << clock << "] " << processoAtual->nome << " sofreu Page Fault na pagina " << paginaPedida << "." << endl;
     
     filaProntos.pop(); 
     
@@ -146,25 +151,40 @@ void ProcessarPageFaults(
     filaBloqueados.push_back({processoAtual, tiquesPenalidadeIO});
 
     AtualizarLRU(memoriaRam, paginaPedida, -1, frames);
+
+    ImprimirEstadoRam(memoriaRam, frames);
 }
 
 void AtualizarLRU(vector<int>& memoriaRam, int pagina, int posicaoRam, int frames){
-    if(posicaoRam != -1){ //remove a pagina da posicao atual, idependente de a Ram estar cheia
-        memoriaRam.erase(memoriaRam.begin() + posicaoRam); //apaga o primeiro
-    }else if(memoriaRam.size() == frames){// pega o tamanho
-        memoriaRam.erase(memoriaRam.begin()); //apaga o primeiro    
+    if(posicaoRam != -1){ 
+        memoriaRam.erase(memoriaRam.begin() + posicaoRam); 
+    }else if(memoriaRam.size() == frames){
+        memoriaRam.erase(memoriaRam.begin());     
     }
 
     memoriaRam.push_back(pagina);
 }
 
-void AtualizarBloquados(vector<ProcessoBloqueado>& filaBloqueados, queue<Processo*>& filaProntos){
+void ImprimirEstadoRam(const vector<int>& memoriaRam, int frames) {
+    cout << "   -> Estado da RAM: ";
+    for (int i = 0; i < frames; i++) {
+        if (i < memoriaRam.size()) {
+            cout << "[ " << memoriaRam[i] << " ] ";
+        } else {
+            cout << "[ Vazio ] ";
+        }
+    }
+    cout << endl;
+}
+
+void AtualizarBloquados(vector<ProcessoBloqueado>& filaBloqueados, queue<Processo*>& filaProntos, int clock){
     int i=0;
     while(i < filaBloqueados.size()){
         filaBloqueados[i].tempoBloqueado--;
         
         if(filaBloqueados[i].tempoBloqueado==0){
             filaProntos.push(filaBloqueados[i].processo);
+            cout << "[Tempo " << clock << "] " << filaBloqueados[i].processo->nome << " saiu do I/O e voltou para a fila de prontos." << endl;
             filaBloqueados.erase(filaBloqueados.begin() + i);
         } else {
             i++;
@@ -196,10 +216,12 @@ int main () {
     while(processosConcluidos < filaInicial.size()){
         AdicionarProcessoFilaProntos(filaInicial, filaProntos, clock);
 
-        AtualizarBloquados(filaBloqueados, filaProntos);
+        AtualizarBloquados(filaBloqueados, filaProntos, clock);
 
         if(!filaProntos.empty()){
             VerificarPaginasRam(filaProntos, memoriaRam, filaBloqueados, tiquesPenalidadeIO, clock, frames, quantum, processosConcluidos);
+        } else {
+            cout << "[Tempo " << clock << "] CPU ociosa." << endl;
         }
 
         clock++;
